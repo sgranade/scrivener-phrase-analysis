@@ -37,6 +37,25 @@ def _process_binder_item(elem: etree.Element, scrivenings: dict):
         scrivenings[item_id] = title
 
 
+def get_scrivener_index_filename(basedir):
+    """
+    Find the base Scrivener file in a Scrivener project.
+
+    :param basedir: The Scrivener project directory.
+    :return: The Scrivener index file's name.
+    """
+    files = glob.glob(os.path.join(os.path.dirname(basedir), '**/*.scrivx'), recursive=True)
+
+    if not files:
+        raise FileNotFoundError("No Scrivener file found in the directory {}".format(basedir))
+    if len(files) > 1:
+        raise RuntimeError("Too many Scrivener files found in the directory {}: {}".format(
+            basedir, ", ".join(files)
+        ))
+
+    return files
+
+
 def find_compiled_scrivenings(stream):
     scrivenings = OrderedDict()
     context = etree.iterparse(stream, events=('end',), tag='BinderItem')
