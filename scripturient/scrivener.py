@@ -63,7 +63,7 @@ class ScrivenerProject(object):
 
     def read_scrivening(self, scrivening_id: int) -> pyth.document.Document:
         """
-        Read an individual scrivening from disk.
+        Read an individual scrivening from disk as RTF.
 
         :param scrivening_id: The ID of the scrivening to read. See the scrivenings attribute for more.
         :return: The RTF-formatted scrivening in pyth's Document form.
@@ -76,11 +76,15 @@ class ScrivenerProject(object):
                 scrivening_id, self.scrivenings[scrivening_id]
             )) from e
 
-    def read_scrivening_as_text(self, scrivening_id: int) -> str:
-        stream = Plaintextifier.convert(self.read_scrivening(scrivening_id))
-        text = stream.getvalue()
-        stream.close()
-        return text
+    def read_scrivening_as_text(self, scrivening_id: int) -> List[str]:
+        """
+        Read an individual scrivening from disk as plain text.
+
+        :param scrivening_id: The ID of the scrivening to read. See the scrivenings attribute for more.
+        :return: The scrivening as a list of paragraphs.
+        """
+        paragraphs = Plaintextifier.convert(self.read_scrivening(scrivening_id))
+        return paragraphs
 
 
 def get_scrivener_project_file_path(basedir: str):

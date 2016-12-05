@@ -8,16 +8,12 @@ from io import StringIO
 
 class Plaintextifier(object):
     @classmethod
-    def convert(cls, doc, target=None, newline="\n"):
-        if target is None:
-            target = StringIO()
-
-        writer = Plaintextifier(doc, target, newline)
+    def convert(cls, doc, newline="\n"):
+        writer = Plaintextifier(doc, newline)
         return writer.go()
 
-    def __init__(self, doc, target, newline):
+    def __init__(self, doc, newline):
         self.document = doc
-        self.target = target
         self.newline = newline
         self.indent = -1
         self.paragraphDispatch = {
@@ -29,34 +25,33 @@ class Plaintextifier(object):
         paragraphs = []
         for (i, paragraph) in enumerate(self.document.content):
             handler = self.paragraphDispatch[paragraph.__class__]
-            handler(paragraph)
-            self.target.write(self.newline)
+            paragraphs.extend(handler(paragraph))
 
-        self.target.seek(0)
-        return self.target
+        return paragraphs
 
     def _convert_paragraph(self, paragraph, prefix=""):
-        content = []
-        for text in paragraph.content:
-            content.append(u"".join(text.content))
+        content = [u"".join(text.content) for text in paragraph.content]
         content = u"".join(content)
 
         if prefix or self.indent > 0:
+            subcontent = []
+            indent = "  " * self.indent
             for line in content.splitlines():
-                self.target.write("  " * self.indent)
-                self.target.write(prefix)
-                self.target.write(line)
-                self.target.write(self.newline)
+                subcontent.append(indent+prefix+line+self.newline)
                 if prefix:
                     prefix = "  "
+            return subcontent
+
         else:
-            self.target.write(self.newline.join(content.splitlines()) + self.newline)
+            return content.splitlines()
 
     def _convert_list(self, doc_list, prefix=None):
         self.indent += 1
+        subcontent = []
         for entry in doc_list.content:
             for j, paragraph in enumerate(entry.content):
                 prefix = "* " if j == 0 else "  "
                 handler = self.paragraphDispatch[paragraph.__class__]
-                handler(paragraph, prefix)
+                subcontent.extend(handler(paragraph, prefix))
         self.indent -= 1
+        return subcontent
