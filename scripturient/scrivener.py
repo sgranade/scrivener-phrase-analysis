@@ -6,7 +6,7 @@ from typing import Callable, List
 from lxml import etree
 import pyth.document
 from pyth.plugins.rtf15.reader import Rtf15Reader
-from .plaintext import PlaintextWriter
+from .plaintextify import Plaintextifier
 
 
 def _fast_iter(context: etree.iterparse, func: Callable[[etree.Element], None]):
@@ -77,7 +77,7 @@ class ScrivenerProject(object):
             )) from e
 
     def read_scrivening_as_text(self, scrivening_id: int) -> str:
-        stream = PlaintextWriter.write(self.read_scrivening(scrivening_id))
+        stream = Plaintextifier.convert(self.read_scrivening(scrivening_id))
         text = stream.getvalue()
         stream.close()
         return text
