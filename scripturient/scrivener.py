@@ -9,23 +9,24 @@ from pyth.plugins.rtf15.reader import Rtf15Reader
 from .plaintextify import Plaintextifier
 
 
-def _fast_iter(context: etree.iterparse, func: Callable[[etree.Element], None]):
+def _fast_iter(context: etree.iterparse, func: Callable[[str, etree.Element], bool]):
     """
     Iterate over an etree iterparse context and apply a function to each parsed element, freeing memory
     as we go.
 
     :param context: The iterparse context over which to loop.
-    :param func: A function which takes an etree Element as its sole argument.
+    :param func: A function which takes the event string and an etree Element as its arguments and
+    returns True if the element should be freed, False if not.
     """
     for event, elem in context:
-        func(elem)
-        elem.clear()
+        if func(event, elem):
+            elem.clear()
         while elem.getprevious() is not None:
             del elem.getparent()[0]
     del context
 
 
-def _select_compiled_binder_item(elem: etree.Element, scrivenings: dict):
+def _select_compiled_binder_item(event: str, elem: etree.Element, scrivenings: dict) -> bool:
     item_id = elem.get('ID')
     item_type = elem.get('Type')
     # Only work with text or folder items
@@ -34,6 +35,7 @@ def _select_compiled_binder_item(elem: etree.Element, scrivenings: dict):
 
     title = "BinderItem ID {}".format(item_id)
     include_in_compile = False
+        return True
 
     for sub_elem in elem.iterchildren('Title', 'MetaData', 'Children'):
         if sub_elem.tag == 'Title':
@@ -49,6 +51,7 @@ def _select_compiled_binder_item(elem: etree.Element, scrivenings: dict):
 
     if include_in_compile:
         scrivenings[item_id] = title
+    return True
 
 
 class ScrivenerProject(object):
@@ -126,8 +129,9 @@ def get_compiled_scrivenings(stream):
     """
     scrivenings = OrderedDict()
     context = etree.iterparse(stream, events=('end',), tag='BinderItem')
+    def selection_wrapper(event, elem):
+        return _select_compiled_binder_item(event, elem, scrivenings)
 
-    _fast_iter(context, lambda elem:
-        _select_compiled_binder_item(elem, scrivenings))
+    _fast_iter(context, selection_wrapper)
 
     return scrivenings
