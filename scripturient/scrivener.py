@@ -54,6 +54,17 @@ def _select_compiled_binder_item(event: str, elem: etree.Element, scrivenings: d
     return True
 
 
+class Scrivening(object):
+    def __init__(self, binder_id: int, title: str = None, include_in_compile: bool = True):
+        self.id = binder_id
+        if title:
+            self.title = title
+        else:
+            self.title = "Scrivening (ID {})".format(binder_id)
+        self.include_in_compile = include_in_compile
+        self.children = []
+
+
 class ScrivenerProject(object):
     def __init__(self, project_dir):
         self.project_dir = project_dir
