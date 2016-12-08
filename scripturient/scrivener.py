@@ -28,29 +28,40 @@ def _fast_iter(context: etree.iterparse, func: Callable[[str, etree.Element], bo
 
 def _select_compiled_binder_item(event: str, elem: etree.Element, scrivenings: dict) -> bool:
     item_id = elem.get('ID')
+
+    # To deal with nested BinderElements, record the outer-most one's ID
+    if event == 'start':
+        try:
+            scrivenings[item_id]
+        except KeyError:
+            scrivenings[item_id] = Scrivening(item_id, include_in_compile=False)
+        return False
+
+    if event != 'end':
+        raise ValueError('Received unexpected lxml event type '+event)
+
+    scrivening = scrivenings[item_id]
+
     item_type = elem.get('Type')
     # Only work with text or folder items
     if item_type != 'Text' and item_type != 'Folder':
-        return
-
-    title = "BinderItem ID {}".format(item_id)
-    include_in_compile = False
         return True
 
-    for sub_elem in elem.iterchildren('Title', 'MetaData', 'Children'):
+    for sub_elem in elem.iterchildren('Title', 'MetaData'):
         if sub_elem.tag == 'Title':
-            title = sub_elem.text
+            scrivening.title = sub_elem.text
         elif sub_elem.tag == 'MetaData':
             for inclusion in sub_elem.iterchildren('IncludeInCompile'):
                 if inclusion.text == 'Yes':
-                    include_in_compile = True
-        else:
-            # We've got to recursively process any kids, since this may be a collection
-            for binder_item in sub_elem.iterchildren('BinderItem'):
-                _select_compiled_binder_item(binder_item, scrivenings)
+                    scrivening.include_in_compile = True
 
-    if include_in_compile:
-        scrivenings[item_id] = title
+    # Deal with the fact that we might be a kid
+    parent = elem.getparent()
+    if parent.tag == 'Children':
+        parent_binder_id = parent.getparent().get('ID')
+        scrivenings[parent_binder_id].children.append(scrivening)
+        del scrivenings[item_id]
+
     return True
 
 
@@ -139,7 +150,8 @@ def get_compiled_scrivenings(stream):
     :return: Ordered dictionary whose keys are the scrivening IDs and whose values are the title.
     """
     scrivenings = OrderedDict()
-    context = etree.iterparse(stream, events=('end',), tag='BinderItem')
+    context = etree.iterparse(stream, events=('start', 'end',), tag='BinderItem')
+
     def selection_wrapper(event, elem):
         return _select_compiled_binder_item(event, elem, scrivenings)
 
