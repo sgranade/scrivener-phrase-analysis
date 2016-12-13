@@ -4,6 +4,7 @@ import os
 from typing import Callable, List
 
 from lxml import etree
+import nltk
 import pyth.document
 from pyth.plugins.rtf15.reader import Rtf15Reader
 from .plaintextify import Plaintextifier
@@ -26,7 +27,7 @@ def _fast_iter(context: etree.iterparse, func: Callable[[str, etree.Element], bo
     del context
 
 
-def _select_compiled_binder_item(event: str, elem: etree.Element, scrivenings: dict) -> bool:
+def _select_compiled_binder_item(event: str, elem: etree.Element, project_dir: str, scrivenings: dict) -> bool:
     item_id = elem.get('ID')
 
     # To deal with nested BinderElements, record the outer-most one's ID
@@ -34,7 +35,7 @@ def _select_compiled_binder_item(event: str, elem: etree.Element, scrivenings: d
         try:
             scrivenings[item_id]
         except KeyError:
-            scrivenings[item_id] = Scrivening(item_id, include_in_compile=False)
+            scrivenings[item_id] = Scrivening(item_id, project_dir=project_dir, include_in_compile=False)
         return False
 
     if event != 'end':
@@ -65,54 +66,7 @@ def _select_compiled_binder_item(event: str, elem: etree.Element, scrivenings: d
     return True
 
 
-class Scrivening(object):
-    def __init__(self, binder_id: int, title: str = None, include_in_compile: bool = True):
-        self.id = binder_id
-        if title:
-            self.title = title
-        else:
-            self.title = "Scrivening (ID {})".format(binder_id)
-        self.include_in_compile = include_in_compile
-        self.children = []
-
-
-class ScrivenerProject(object):
-    def __init__(self, project_dir):
-        self.project_dir = project_dir
-        try:
-            self.project_file = get_scrivener_project_file_path(project_dir)
-        except Exception as e:
-            raise ValueError("The project directory does not appear to contain a Scrivener project file") from e
-        with open(self.project_file, 'rb') as fh:
-            self.scrivenings = get_compiled_scrivenings(fh)
-
-    def read_scrivening(self, scrivening_id: int) -> pyth.document.Document:
-        """
-        Read an individual scrivening from disk as RTF.
-
-        :param scrivening_id: The ID of the scrivening to read. See the scrivenings attribute for more.
-        :return: The RTF-formatted scrivening in pyth's Document form.
-        """
-        try:
-            with open(get_scrivening_file_path(self.project_dir, scrivening_id), 'rb') as fh:
-                return Rtf15Reader.read(fh)
-        except FileNotFoundError as e:
-            raise FileNotFoundError("Couldn't find the file for scrivening ID {} (title: {})".format(
-                scrivening_id, self.scrivenings[scrivening_id]
-            )) from e
-
-    def read_scrivening_as_text(self, scrivening_id: int) -> List[str]:
-        """
-        Read an individual scrivening from disk as plain text.
-
-        :param scrivening_id: The ID of the scrivening to read. See the scrivenings attribute for more.
-        :return: The scrivening as a list of paragraphs.
-        """
-        paragraphs = Plaintextifier.convert(self.read_scrivening(scrivening_id))
-        return paragraphs
-
-
-def get_scrivener_project_file_path(basedir: str):
+def _get_scrivener_project_file_path(basedir: str):
     """
     Find the base Scrivener file in a Scrivener project.
 
@@ -131,7 +85,7 @@ def get_scrivener_project_file_path(basedir: str):
     return files[0]
 
 
-def get_scrivening_file_path(basedir: str, scrivening_id: int):
+def _get_scrivening_file_path(basedir: str, scrivening_id: int):
     """
     Find the RTF-formatted file corresponding to a scrivening ID.
 
@@ -142,19 +96,95 @@ def get_scrivening_file_path(basedir: str, scrivening_id: int):
     return os.path.join(basedir, 'Files', 'Docs', '{}.rtf'.format(scrivening_id))
 
 
-def get_compiled_scrivenings(stream):
+def _get_compiled_scrivenings(project_dir, stream):
     """
     Find all pieces of text in the binder that are compiled to the final output.
 
+    :param project_dir: Top-most directory of the Scrivener project.
     :param stream: Open bytes stream containing the Scrivener project file.
-    :return: Ordered dictionary whose keys are the scrivening IDs and whose values are the title.
+    :return: List of top-level scrivenings.
     """
     scrivenings = OrderedDict()
     context = etree.iterparse(stream, events=('start', 'end',), tag='BinderItem')
 
     def selection_wrapper(event, elem):
-        return _select_compiled_binder_item(event, elem, scrivenings)
+        return _select_compiled_binder_item(event, elem, project_dir, scrivenings)
 
     _fast_iter(context, selection_wrapper)
 
-    return scrivenings
+    return list(scrivenings.values())
+
+
+class Scrivening(object):
+    def __init__(self, binder_id: int, project_dir: str, title: str = None, include_in_compile: bool = True):
+        self.id = binder_id
+        if title:
+            self.title = title
+        else:
+            self.title = "Scrivening (ID {})".format(binder_id)
+        self.include_in_compile = include_in_compile
+        self.children = []
+        self.file_path = _get_scrivening_file_path(project_dir, binder_id)
+
+        self._rtf = None
+        self._text = None
+
+    def rtf(self) -> pyth.document.Document:
+        """
+        Get the RTF-formatted version of the scrivening.
+
+        :return: The RTF-formatted scrivening in pyth's Document form.
+        """
+        if not self._rtf:
+            try:
+                with open(self.file_path, 'rb') as fh:
+                    self._rtf = Rtf15Reader.read(fh)
+            except FileNotFoundError as e:
+                raise FileNotFoundError("Couldn't find the file for scrivening ID {} (title: {})".format(
+                    self.id, self.title
+                )) from e
+
+        return self._rtf
+
+    def text(self) -> List[str]:
+        """
+        Get the plain-text version of the scrivening.
+
+        :return: The scrivening in plain text.
+        """
+        if not self._text:
+            self._text = Plaintextifier.convert(self.rtf())
+
+        return self._text
+
+
+def _get_scrivening_as_flat_text_list(scrivening: Scrivening) -> List[str]:
+    contents = []
+
+    try:
+        contents.extend(scrivening.text())
+    except FileNotFoundError:
+        pass
+
+    for child in scrivening.children:
+        contents.extend(_get_scrivening_as_flat_text_list(child))
+
+    return contents
+
+
+def tokenize_scrivening(scrivening: Scrivening) -> List[str]:
+    # TODO: this requires the punkt tokenizer model from nltk. Right now it's in Appdata\Roaming\nltk_data
+    contents = _get_scrivening_as_flat_text_list(scrivening)
+    tokens = nltk.word_tokenize("\n".join(contents))
+    return tokens  # TODO should this be a Text() object?
+
+
+class ScrivenerProject(object):
+    def __init__(self, project_dir):
+        self.project_dir = project_dir
+        try:
+            self.project_file = _get_scrivener_project_file_path(project_dir)
+        except Exception as e:
+            raise ValueError("The project directory does not appear to contain a Scrivener project file") from e
+        with open(self.project_file, 'rb') as fh:
+            self.scrivenings = _get_compiled_scrivenings(project_dir, fh)
